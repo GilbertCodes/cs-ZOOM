@@ -1,3 +1,4 @@
+from http import client
 from socket import *
 import sys
 
@@ -14,31 +15,43 @@ clientSocket = socket(AF_INET, SOCK_STREAM)
 
 # build connection with the server and send message to it
 clientSocket.connect(serverAddress)
-
 while True:
-    message = input("===== Please type any messsage you want to send to server: =====\n")
-    clientSocket.sendall(message.encode())
 
-    # receive response from the server
-    # 1024 is a suggested packet size, you can specify it as 2048 or others
-    data = clientSocket.recv(1024)
-    receivedMessage = data.decode()
 
-    # parse the message received from server and take corresponding actions
-    if receivedMessage == "":
-        print("[recv] Message from server is empty!")
-    elif receivedMessage == "user credentials request":
-        print("[recv] You need to provide username and password to login")
-    elif receivedMessage == "download filename":
-        print("[recv] You need to provide the file name you want to download")
-    else:
-        print("[recv] Message makes no sense")
+    # if clientSocket.recv(1024).decode() == "request username":
         
-    ans = input('\nDo you want to continue(y/n) :')
-    if ans == 'y':
-        continue
+    #     #server = clientSocket.recv(1024).decode()
+    #     username = input("Username: ")
+    #     clientSocket.send(username.encode())
+
+    #     if clientSocket.recv(1024).decode() == "blocked user":
+    #         print("blocked test")
+
+    # if clientSocket.recv(1024).decode() == "request password":
+    #     #server = clientSocket.recv(1024).decode()
+    #     password = input("Password: ")
+    #     clientSocket.send(password.encode())
+
+    username = input("Username: ")
+    password = input("Password: ")
+    commandRequest = f"login " + username + " " + password
+    print("test")
+    print(commandRequest)
+    clientSocket.send(commandRequest.encode())
+    # Waiting for response from server
+    response = clientSocket.recv(1024).decode()
+    if (response == "success"):
+        print("Ive successfully logged in")
+        while True:
+            command = input("===== Please type any messsage you want to send to server: =====\n")
+            #commandRequest = command.split(" ", 1)
+            clientSocket.send(command.encode())
+
     else:
-        break
+        print(response)
+
+
+    # clientSocket.send(username.encode())
 
 # close the socket
 clientSocket.close()
