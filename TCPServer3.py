@@ -14,19 +14,17 @@ users = [
         password:
         ip_address:
     }
-    {
-        username:
-        password:
-        ip_address:
-    }
+    
 ]
 '''
 blocked_users = []
 server_messages = []
 rooms = []
 num_messages = 1
+room_num_messages = 1
 num_users = 1
 num_rooms = 1
+BUFF_SIZE = 65536
 
 # acquire server host and port from command line parameter
 if len(sys.argv) != 3:
@@ -81,20 +79,20 @@ class ClientThread(Thread):
             # if the message from client is empty, the client would be off-line then set the client as offline (alive=Flase)
             if message == '':
                 self.clientAlive = False
-                print("===== the user disconnected - ", self.clientAddress)
+                print("===== the user disconnected ====", self.clientAddress)
                 break
             messageSaved = message
             message = message.split(" ")
            
             # handle message from the client
             if message[0] == 'login':
-                print("[recv] New login request")
+                
                 isLoggedIn = self.process_login(messageSaved)
                 self.clientSocket.send(isLoggedIn.encode())
 
             elif message[0] == 'BCM':
                 username = message[-1]
-                message.remove(username)
+                message.remove(message[-1])
                 message.remove(message[0])
                 
                 acknowledge = self.broadcastMessage(message,username)
@@ -103,30 +101,51 @@ class ClientThread(Thread):
             elif message[0] == 'ATU':
                 username = message[1]
                 acknowledge = self.downloadActiveUsers(username)
-                print("ack")
-                print(acknowledge)
+                
+                print("ATU Return Message: " + f'{acknowledge}')
+                
                 if isinstance(acknowledge, str) == True:
                     self.clientSocket.send(acknowledge.encode())
+                    
                     
                 else:
                     data = pickle.dumps(acknowledge)
                     self.clientSocket.send(data)
+                    
 
             elif message[0] == 'SRB':
                 username = message[-1]
-                message.remove(username)
+                message.remove(message[-1])
                 message.remove(message[0])
+                print(username + " issued SRB command")
                 
                 acknowledge = self.seperateRoomBuild(username, message)
                 self.clientSocket.send(acknowledge.encode())
+
             elif message[0] == 'SRM':
-                print(message)
+                username = message[-1]
+                message.remove(message[-1])
+                message.remove(message[0])
+
+                acknowledge = self.seperateRoomMessage(username, message)
+                
+                self.clientSocket.send(acknowledge.encode())
             elif message[0] == 'RDM':
-                print("[recv] " + message)
+                username = message[-1]
+                message.remove(message[-1])
+                message.remove(message[0])
+        
+                acknowledge = self.readMessage(username, message)
+                data = pickle.dumps(acknowledge)
+                self.clientSocket.send(data)
+
             elif message[0] == 'UDP':
                 print("[recv] " + message)
             elif message[0] == 'OUT':
-                print("[recv] " + message)
+                print(message[1] + " logout")
+                username = message[1]
+                acknowledge = self.logOut(username)
+                self.clientSocket.send(acknowledge.encode())
             else:
                 print("[recv] " + message)
     
@@ -139,25 +158,18 @@ class ClientThread(Thread):
     """
     def process_login(self, message):
         global num_users
-        # errorCounter = 0
-
-        # self.clientSocket.send("request username".encode())
-        # # self.clientSocket.send("success username".encode())   
-        # username = self.clientSocket.recv(1024).decode()
+        
         message = message.split(" ")
-        #print(message)
+        
         username = message[1]
         password = message[2]
         port_number = message[3]
 
-        # print("username and password")
-        # print(username)
-        # print(password)
-
+        
         for blocked in blocked_users:   
             if username == blocked['username']:
                 if time.time() - blocked['time'] > 10:
-                    del blocked
+                    blocked_users.remove(blocked)
                 else:
                     return "Your account is blocked due to multiple login failures. Please try again later"
         u_id = num_users
@@ -165,12 +177,12 @@ class ClientThread(Thread):
         if self.checkPassword(username) == password:
             # process password
             new_user = { "u_id": u_id, "username": username, "password": password, 
-            "ip_address": self.clientAddress[0], "port_number": port_number }
+            "ip_address": self.clientAddress[0], "port_number": port_number, "time": datetime.datetime.now()}
             users.append(new_user)
             num_users += 1
             
             info = (str(u_id) + "; " + f"{datetime.datetime.now()}; " + username + "; " + self.clientAddress[0] + "; " + port_number)
-            self.writeFile("userlog.txt", info)
+            self.writeFile("userlog.txt", info, False)
             return "success"
 
         else:
@@ -204,7 +216,12 @@ class ClientThread(Thread):
         messageBody = ' '.join(message)
 
         info = (str(m_id) + "; " + f"{datetime.datetime.now()}; " + username + "; " + messageBody)
-        self.writeFile("messagelog.txt", info)
+        self.writeFile("messagelog.txt", info, False)
+
+        new_message = {"m_id": m_id, "user": username, "time": datetime.datetime.now(), "message": messageBody}
+
+        server_messages.append(new_message)
+
 
         print(username + " broadcasted BCM #" + str(m_id) + " " + messageBody + " at " + f"{datetime.datetime.now()}")
         num_messages += 1
@@ -213,15 +230,12 @@ class ClientThread(Thread):
     
     def downloadActiveUsers(self, username):
         userList = []
-        users = open("userlog.txt", "r")
+        #users = open("userlog.txt", "r")
         for x in users:
-            x = x.split("; ")
-            if x[2] != username:
-                info = (x[2] + " " + x[1] + " " + x[3] + " " + x[4])
+            #x = x.split("; ")
+            if x['username'] != username:
+                info = (x['username'] + ", " + f"{x['time']}")
                 userList.append(info)
-        
-        print("userList")
-        print(userList)
 
         if len(userList) == 0:
             return "empty list"
@@ -230,11 +244,8 @@ class ClientThread(Thread):
     
     def seperateRoomBuild(self, username, message):
         global num_rooms
-        global users
-        #users = open("userlog.txt", "r")
-        checker = 0
 
-        
+        checker = 0
         r_id = num_rooms
         
         for addUsers in message:
@@ -253,12 +264,12 @@ class ClientThread(Thread):
             if test == True:
                 return "created" + " " + str(i['r_id'])
             
-            new_room = {"r_id": r_id, "users": message, "messages": {}}
+            new_room = {"r_id": r_id, "users": message, "messages": []}
             rooms.append(new_room) 
-            
-
-            print(rooms)
-            self.writeFile(str(num_rooms) + "_messagelog.txt", "")
+            print("Seperate chat room has been created, room ID:" + str(r_id) + ", users in this room:" + f'{message}')
+            # print("1")
+            # print(rooms)
+            self.writeFile("SR_" + str(num_rooms) + "_messagelog.txt", "", True)
             num_rooms += 1
             
             return "success" + " " + str(r_id)
@@ -266,8 +277,99 @@ class ClientThread(Thread):
             
             return "Usernames either don't exist or aren't online"
 
-    def seperateRoomService(self, username, message):
-        print("test")
+    def seperateRoomMessage(self, username, message):
+        global room_num_messages
+        
+        r_id = message[0]
+        message.remove(message[0])
+        messageBody = ' '.join(message)
+        
+
+        info = (str(room_num_messages) + "; " + f"{datetime.datetime.now()}; " + username + "; " + messageBody)
+        checker = False
+        userInRoom = False
+        for i in rooms:
+            if i['r_id'] == int(r_id):
+                checker = True
+                for x in i['users']:
+                    if username == x:
+                        print("#" + str(room_num_messages) + "; " + f'{datetime.datetime.now()}' + "; " + username + "; " + str(message))
+                        new_message = {"m_id": str(room_num_messages), "user": username, "time": datetime.datetime.now(), "message": messageBody}
+                        i['messages'].append(new_message)
+                        self.writeFile("SR_" + r_id + "_messagelog.txt", info, False)
+                        room_num_messages += 1
+                        # print("2")
+                        # print(rooms)
+                        return "success"
+                if userInRoom == False:
+                    return "failed2"
+        
+        if checker == False:
+            return "failed"
+    
+    def readMessage(self, username, message):
+        messageType = message[0]
+        message.remove(message[0])
+        sendMessage = []
+        
+        time = ' '.join(message)
+        timestamp = datetime.datetime.strptime(time, '%d/%m/%y %H:%M:%S')
+        
+
+        if messageType == 'b':
+            for i in server_messages:
+                
+                if i['time'] > timestamp:
+                    m_id = i['m_id']
+                    BCM_user = i['user']
+                    BCM_time = i['time']
+                    BCM_message = i['message']
+
+                    info = BCM_user + " broadcasted BCM #" + str(m_id) + " " + BCM_message + " at " + f"{BCM_time}"
+                    sendMessage.append(info)
+
+        elif messageType == 's':
+            for i in rooms:
+                
+                if username in i['users']:
+                    
+                    for j in i['messages']:
+                        
+                        if j['time'] > timestamp:
+                            m_id = j['m_id']
+                            SRM_user = j['user']
+                            SRM_time = j['time']
+                            SRM_message = j['message']
+                            
+                            info = "room #:" + str(i['r_id']) + " #" + str(m_id) + "; " + SRM_user + " broadcasted: " + SRM_message + " at " + f"{SRM_time}"
+                            sendMessage.append(info)
+                            
+        return sendMessage
+    
+    def logOut(self,username):
+        #print(users)
+        for x in users:
+            
+            if x['username'] == username:
+                
+                users.remove(x)
+                file = open('userlog.txt','r')
+                lines = file.readlines()
+                file.close()
+                
+                file = open('userlog.txt','w')
+                for line in lines:
+                    line_user = line.split("; ")
+                    if line_user[2] != username:
+                        file.write(line)
+                return "success"
+        
+        return "fail"
+                
+                
+        
+        
+
     # def checkUsername(self, username):
     #     f = open("credentials.txt", "r")
     #     userList = f.readlines()
@@ -295,9 +397,12 @@ class ClientThread(Thread):
             if address['ip_address'] == ip_address:
                 return address['username']
     
-    def writeFile(self, name, info):
-        file = open(name, 'a+')
-        file.write(info + '\n')
+    def writeFile(self, name, info, reset):
+        if reset == True:
+            file = open(name,'w+')
+        else:
+            file = open(name, 'a+')
+            file.write(info + '\n')
             
 
 print("\n===== Server is running =====")
