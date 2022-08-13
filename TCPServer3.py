@@ -5,6 +5,7 @@ import datetime
 import time
 import pickle
 
+
 users = []
 '''
 users = [
@@ -99,8 +100,11 @@ class ClientThread(Thread):
                 self.clientSocket.send(acknowledge.encode())
 
             elif message[0] == 'ATU':
+                print(message)
                 username = message[1]
-                acknowledge = self.downloadActiveUsers(username)
+                udp_Port = message[2]
+                
+                acknowledge = self.downloadActiveUsers(username, udp_Port)
                 
                 print("ATU Return Message: " + f'{acknowledge}')
                 
@@ -228,13 +232,14 @@ class ClientThread(Thread):
 
         return "success" + " " + str(m_id) + " " + f"{datetime.datetime.now()}"
     
-    def downloadActiveUsers(self, username):
+    def downloadActiveUsers(self, username, udp_Port):
         userList = []
+        
         #users = open("userlog.txt", "r")
         for x in users:
             #x = x.split("; ")
             if x['username'] != username:
-                info = (x['username'] + ", " + f"{x['time']}")
+                info = (x['username'] + ", " + f"{x['time']}" + ", " + x['ip_address'] + ", " + udp_Port)
                 userList.append(info)
 
         if len(userList) == 0:
